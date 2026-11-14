@@ -1,63 +1,95 @@
-# Pipeline Olist: Airflow local, Docker e Google Cloud
+# Olist: construindo um fluxo de dados confiável
 
-Projeto de estudo que usa o Apache Airflow, executado localmente em Docker, para orquestrar a leitura dos CSVs do Olist, convertê-los para Parquet e enviá-los ao Google Cloud Storage. As transformações Silver e Gold continuam no BigQuery/Dataform.
+Este é um projeto individual de portfólio que estou desenvolvendo para praticar engenharia e análise de dados de ponta a ponta. Uso o conjunto público da Olist para aprender a construir um fluxo rastreável, repetível e preparado para validações, desde os arquivos de origem até as tabelas analíticas.
 
-## Arquitetura desta etapa
+Meu objetivo não é apenas mover arquivos entre serviços. Quero entender como cada etapa pode preservar a origem dos dados, tornar falhas visíveis e produzir modelos que sejam confiáveis para análise.
+
+## O que quero aprender e demonstrar
+
+- Orquestrar uma ingestão diária com Apache Airflow.
+- Executar o pipeline localmente em containers Docker.
+- Converter arquivos CSV para Parquet e armazená-los no Google Cloud Storage.
+- Organizar os dados no BigQuery em camadas Raw, Silver e Gold.
+- Transformar e documentar os modelos analíticos com Dataform.
+- Criar verificações de qualidade para identificar chaves nulas e duplicadas.
+- Considerar idempotência, rastreabilidade, credenciais, custos e recuperação após falhas.
+
+## Fluxo de dados
 
 ```text
-CSV local (`data/`)
-  → Airflow no Docker Compose (API, scheduler, DAG processor, worker e triggerer)
-  → PostgreSQL (metadados) + Redis (fila Celery)
-  → tarefa Python + Polars (CSV para Parquet)
-  → Google Cloud Storage (`raw/`)
-  → BigQuery Raw
-  → Dataform (Silver → Gold)
+CSV da Olist
+   ↓
+Airflow local em Docker
+   ↓
+Python + Polars: CSV → Parquet
+   ↓
+Google Cloud Storage: landing/raw por data de extração
+   ↓
+BigQuery: tabelas externas Raw
+   ↓
+Dataform: Silver — tipagem, limpeza e regras de qualidade
+   ↓
+Dataform: Gold — dimensões e fatos para análise
+   ↓
+Power BI
 ```
 
-O Airflow **orquestra** a tarefa. O código de `src/extract.py` faz a conversão e o upload. Os CSVs não são copiados para a imagem Docker; a pasta local `data/` é montada como somente leitura nos containers Airflow. Ela está no `.gitignore` porque contém os dados do projeto.
+O Airflow coordena a execução. O código Python realiza a leitura, conversão e gravação no bucket. O BigQuery e o Dataform ficam responsáveis pelo processamento analítico.
 
-Esta configuração separa os componentes do Airflow, usa PostgreSQL como banco de metadados e Redis como broker para o CeleryExecutor. É um ambiente local de aprendizado inspirado no Compose oficial do Airflow; não é uma implantação de produção pronta, com alta disponibilidade e controles de segurança corporativos.
+## Decisões para tornar o fluxo mais confiável
 
-O DAG está agendado para executar diariamente às 09:00 no fuso `America/Sao_Paulo`. O dataset público Olist usado nesta simulação é estático; portanto, cada execução diária envia novamente o mesmo conteúdo para um caminho com a data da execução. Para produção, conecte a extração a uma fonte que realmente atualize ou ajuste a estratégia de armazenamento para evitar cópias desnecessárias.
+### Execuções rastreáveis e repetíveis
 
-## Pré-requisitos
+Os objetos no bucket são organizados por tabela e data de extração. O caminho da execução é determinístico: uma tentativa repetida do mesmo intervalo escreve no mesmo objeto, em vez de criar uma cópia com nome diferente.
+
+### Separação das responsabilidades
+
+O extrator não aplica as regras de negócio das tabelas analíticas. Ele registra os arquivos convertidos no GCS; as transformações ficam no BigQuery/Dataform. Isso facilita localizar em qual etapa ocorreu um problema.
+
+### Verificações no processo de ingestão
+
+O extrator verifica se a pasta de origem existe, se há arquivos CSV para processar e se nomes diferentes não foram mapeados para a mesma tabela Raw. O Airflow também está configurado com tentativas adicionais em caso de falha da tarefa.
+
+### Qualidade dos dados
+
+Na Silver, pretendo padronizar tipos e valores e validar regras importantes antes de publicar os modelos Gold. Já existe uma assertion de exemplo para encontrar pedidos com `order_id` nulo ou duplicado. O próximo passo é ampliar as verificações para relacionamentos, datas e valores válidos.
+
+### Credenciais e configuração
+
+As credenciais do Google Cloud são fornecidas localmente pelo Application Default Credentials e montadas como somente leitura nos containers. O arquivo `.env` guarda a configuração local e não deve ser publicado. Não incluo credenciais, arquivos de dados ou o relatório do Power BI neste repositório.
+
+## Tecnologias
+
+- Python e Polars
+- Apache Airflow 3 com CeleryExecutor
+- Docker Compose
+- PostgreSQL para metadados do Airflow
+- Redis como broker de tarefas
+- Google Cloud Storage
+- BigQuery e Dataform
+- Power BI
+
+## Execução local
+
+### Pré-requisitos
 
 - Docker Desktop com Docker Compose v2.
-- Google Cloud CLI instalado e autenticado com acesso de gravação no bucket.
-- Os CSVs originais dentro de `data/`.
-- Pelo menos 4 GB de memória alocados ao Docker; 8 GB é recomendado para o quick-start oficial do Airflow.
+- Google Cloud CLI autenticado com acesso de gravação no bucket.
+- Arquivos CSV da Olist na pasta `data/`.
+- Configuração local no arquivo `.env`, incluindo projeto GCP, bucket e segredos de desenvolvimento do Airflow.
 
-No PowerShell, configure Application Default Credentials:
+Para configurar as credenciais ADC no Windows:
 
 ```powershell
 gcloud auth application-default login
-```
-
-Isso cria as credenciais ADC em `%APPDATA%\gcloud\application_default_credentials.json`. O Compose monta esse arquivo como somente leitura no container. Nunca coloque o JSON de credenciais no repositório. A documentação do GCS do Apache Hop também descreve o uso de credenciais ADC ou de uma conta de serviço. [Credenciais do GCS](https://cloud.google.com/docs/authentication/application-default-credentials)
-
-O usuário autenticado precisa poder gravar objetos no bucket configurado. Para execução pessoal, use as permissões já concedidas ao usuário; para uma implantação de produção, prefira uma conta de serviço com permissões mínimas.
-
-## Configuração
-
-Copie o exemplo para `.env` e configure o bucket, as credenciais locais do Airflow e as chaves de desenvolvimento:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-O valor inicial do bucket é `chicagoportal`. No `.env`, substitua `replace-with-your-gcp-project-id` pelo **ID do projeto** que contém o bucket. Você pode consultar o projeto ativo com `gcloud config get-value project` ou copiá-lo da página de detalhes do projeto no Console do Google Cloud. O `.env` está no `.gitignore`: não o publique. Os valores do `.env.example` servem apenas para esta simulação local; use segredos próprios e um gerenciador de segredos em produção. Você também pode alterar o bucket em `.env`.
-
-O Compose monta as Application Default Credentials já existentes no Windows em `%APPDATA%\gcloud\application_default_credentials.json`. Como você já autenticou o SDK, não precisa repetir o login se esse arquivo estiver presente. Confirme com:
-
-```powershell
 Test-Path "$env:APPDATA\gcloud\application_default_credentials.json"
 ```
 
-O resultado precisa ser `True`.
+Se o SDK já estiver autenticado e o arquivo existir, não é necessário autenticar novamente. Configure os valores locais do projeto no `.env`; não reutilize segredos de desenvolvimento em ambientes de produção.
 
-## Executar localmente
+### Iniciar os serviços
 
-Na raiz do projeto, construa a imagem, inicialize o PostgreSQL/Airflow e inicie os serviços:
+Na raiz do projeto:
 
 ```powershell
 docker compose build
@@ -65,28 +97,28 @@ docker compose up airflow-init
 docker compose up -d
 ```
 
-O passo `airflow-init` aplica as migrações do banco de metadados e cria o usuário administrador. Abra [http://localhost:8080](http://localhost:8080) e use o usuário e a senha definidos em `.env`.
+Abra [http://localhost:8080](http://localhost:8080), acesse o DAG `olist_csv_to_gcs` e use **Trigger DAG** para iniciar uma execução manual. O DAG também está configurado para executar diariamente às 09:00 no fuso `America/Sao_Paulo`, desde que o computador e os containers estejam ativos.
 
-Na interface, abra o DAG `olist_csv_to_gcs` e use **Trigger DAG**. A tarefa `convert_and_upload_to_gcs` é enviada pelo scheduler ao worker Celery, que executa o extrator. Para acompanhar os componentes:
+Para acompanhar os serviços:
 
 ```powershell
 docker compose ps
 docker compose logs --tail 100 airflow-worker airflow-scheduler airflow-apiserver
 ```
 
-O Airflow local precisa permanecer rodando para cumprir horários agendados. Para encerrar os containers sem apagar o estado do PostgreSQL:
+Para parar os containers preservando o banco local do Airflow:
 
 ```powershell
 docker compose down
 ```
 
-`docker compose down --volumes` também apaga o banco local e o histórico do Airflow; os arquivos já enviados ao GCS não são apagados.
+O comando `docker compose down --volumes` apaga também o banco de metadados e o histórico local do Airflow.
 
-## Saída no bucket
+## Arquivos enviados ao bucket
 
-Os nomes dos arquivos Olist são mapeados para os nomes Raw usados pelas consultas existentes:
+O extrator mapeia os arquivos da Olist para os nomes usados nas tabelas Raw:
 
-| Arquivo local | Tabela Raw | Objeto Parquet |
+| Arquivo de origem | Nome Raw | Caminho no GCS |
 |---|---|---|
 | `olist_customers_dataset.csv` | `customers` | `raw/customers/data_extracao=AAAA-MM-DD/customers.parquet` |
 | `olist_order_items_dataset.csv` | `order_items` | `raw/order_items/data_extracao=AAAA-MM-DD/order_items.parquet` |
@@ -95,18 +127,23 @@ Os nomes dos arquivos Olist são mapeados para os nomes Raw usados pelas consult
 | `olist_sellers_dataset.csv` | `sellers` | `raw/sellers/data_extracao=AAAA-MM-DD/sellers.parquet` |
 | `product_category_name_translation.csv` | `product_category_name_translation` | `raw/product_category_name_translation/data_extracao=AAAA-MM-DD/product_category_name_translation.parquet` |
 
-A data usada no caminho é a data de fim do intervalo agendado, convertida para `America/Sao_Paulo`. Assim, a execução das 09:00 grava a partição com a data daquele dia. Uma nova tentativa da mesma execução reutiliza o mesmo caminho, evitando gerar outra partição para o mesmo run.
+O dataset público da Olist é estático. Enquanto eu usar os mesmos CSVs, a execução diária reenviará os mesmos dados em uma nova partição de data. Essa escolha serve para praticar o fluxo e o histórico de ingestão; uma fonte que muda diariamente exigiria uma estratégia de captura e atualização adequada.
 
-## Transformações
+## Estado do projeto
 
-Esta etapa termina no upload ao GCS. As consultas em `sql_tratativas/silver/` e `sql_tratativas/gold/` continuam sob execução do Dataform/BigQuery. O próximo passo pode adicionar ao DAG uma tarefa que só inicia a execução do Dataform depois de confirmar que o upload terminou.
+A ingestão local em Docker, o envio de Parquet ao GCS e os primeiros modelos SQL estão montados. Estou construindo e validando as tabelas externas Raw e as transformações Silver e Gold.
 
-## Custos e limites desta simulação
+Um ajuste pendente é alinhar as consultas Silver ao dataset de origem escolhido: alguns SQLs atuais ainda referenciam `Bronze.*`, enquanto o desenho adotado para esta etapa usa `Raw.*`. Portanto, os modelos SQL devem ser revisados e executados no Dataform depois desse alinhamento.
 
-- O Airflow local não cria uma VM nem um serviço Airflow gerenciado no GCP. O computador e o Docker precisam estar ligados para o DAG rodar no horário.
-- Ainda podem existir custos de armazenamento no GCS, consultas/processamento no BigQuery e transferência de dados conforme região e uso.
-- O Parquet é salvo em um novo caminho por data. Como este conjunto Olist é estático, o agendamento diário repete os dados e aumenta o armazenamento; mantenha isso em mente enquanto usar os mesmos CSVs.
-- Uma estimativa serverless é possível com as medidas de CPU, memória, tempo por execução, frequência, região, armazenamento e processamento no BigQuery. Use a [calculadora de preços do Google Cloud](https://cloud.google.com/products/calculator) e configure alertas de orçamento; alertas monitoram gastos, mas não impõem automaticamente um teto.
+O fluxo atual ainda não é uma implantação de produção. O Airflow roda no meu computador, que precisa permanecer ligado para cumprir o agendamento. A publicação em um ambiente gerenciado exigiria configuração própria de identidade, segredos, monitoramento, permissões mínimas, custos e estratégia de operação.
 
-O Compose oficial do Airflow também separa API server, scheduler, DAG processor, worker, PostgreSQL e Redis. Ele é indicado para aprender e testar; a própria documentação alerta que essa configuração não oferece, sozinha, as garantias de segurança e disponibilidade de produção. [Guia oficial do Airflow no Docker](https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose.html)
+## Próximas etapas
 
+1. Concluir as external tables no BigQuery Raw e conferir os esquemas.
+2. Alinhar as referências dos SQLs da Silver com as tabelas Raw.
+3. Executar as transformações pelo Dataform e ampliar as assertions de qualidade.
+4. Validar volumes e chaves entre Raw, Silver e Gold.
+5. Conectar os modelos Gold ao Power BI e documentar as métricas.
+6. Avaliar uma opção gerenciada para agendamento e execução fora do computador local.
+
+Este projeto é um exercício de aprendizado contínuo: cada etapa deve deixar claro de onde vieram os dados, o que foi transformado e como verificar se o resultado está correto.

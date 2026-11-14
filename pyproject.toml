@@ -1,0 +1,12 @@
+[project]
+name = "olist-projec"
+version = "0.1.0"
+description = "Ingestão local do dataset Olist com Airflow, Python e Google Cloud Storage"
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "google-cloud-storage==3.17.1",
+    "polars==2.1.0",
+    "pytz==2026.6",
+]
+

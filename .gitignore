@@ -1,0 +1,12 @@
+.venv/
+.uv-cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+data/
+dash_board.pbix
+testes/
+airflow/logs/
+airflow/*.db
+

@@ -1,95 +1,91 @@
-# Projeto Olist: meu estudo de um fluxo de dados confiável
+# Projeto Olist Marketplace
 
-Estou desenvolvendo este projeto para praticar engenharia e análise de dados usando o conjunto público da Olist. Quero entender como levar os dados desde os arquivos de origem até um modelo que possa ser usado em análises e relatórios.
+Estou desenvolvendo este projeto para aprofundar meus conhecimentos em engenharia de dados e praticar a construção de um fluxo confiável, desde a ingestão até a disponibilização dos dados para análise.
 
-Mais do que fazer os arquivos chegarem à nuvem, quero aprender a organizar cada etapa, acompanhar as execuções e conferir se os dados foram processados corretamente.
+Uso o conjunto público da Olist, formado por arquivos CSV de e-commerce. Com ele, estou trabalhando conceitos de orquestração, armazenamento em nuvem, modelagem dimensional, qualidade de dados e consumo analítico.
 
-## O que estou praticando
+## Objetivos técnicos
 
-Neste projeto, estou trabalhando com:
+Neste projeto, quero:
+- orquestrar a ingestão com Apache Airflow;
+- executar localmente os serviços com Docker Compose;
+- converter CSV para Parquet usando Python e Polars;
+- armazenar os arquivos no Google Cloud Storage, organizados por tabela e data de extração;
+- consultar os arquivos no BigQuery por meio de tabelas externas na camada Raw;
+- transformar e validar os dados com Dataform nas camadas Silver e Gold;
+- disponibilizar dimensões e fatos para análise no Power BI;
+- praticar rastreabilidade, repetibilidade e tratamento de falhas.
 
-- leitura de arquivos CSV com Python;
-- conversão dos dados para Parquet com Polars;
-- envio dos arquivos para o Google Cloud Storage;
-- orquestração das tarefas com Apache Airflow;
-- execução local dos serviços usando Docker;
-- organização dos dados no BigQuery nas camadas Raw, Silver e Gold;
-- transformação dos dados com Dataform;
-- validações para encontrar problemas como chaves nulas ou duplicadas;
-- conexão das tabelas analíticas ao Power BI.
-
-## Como estou organizando o fluxo
+## Arquitetura
 
 ```text
 Arquivos CSV da Olist
         ↓
-Airflow executado localmente em Docker
+Python + Polars: leitura e conversão para Parquet
         ↓
-Python e Polars convertem CSV para Parquet
+Apache Airflow em Docker Compose: orquestração
         ↓
-Google Cloud Storage guarda os arquivos por tabela e data
+Google Cloud Storage: arquivos organizados por tabela e data
         ↓
-BigQuery disponibiliza os dados na camada Raw
+BigQuery: tabelas externas na camada Raw
         ↓
-Dataform transforma os dados para Silver e Gold
+Dataform: transformações e validações Silver → Gold
         ↓
-Power BI consome os modelos analíticos
+Power BI: análise dos dados
 ```
 
-Eu uso o Airflow para coordenar as tarefas. O código Python faz a conversão e o envio dos arquivos. Depois, deixo as transformações analíticas para o BigQuery e o Dataform.
+O Airflow coordena a execução e registra o resultado das tarefas. O código em `src/extract.py` localiza os CSVs, converte os dados para Parquet e envia os arquivos ao bucket. As transformações analíticas ficam no BigQuery/Dataform.
 
-## Por que estou usando essas camadas
+No ambiente local, o Docker Compose separa os serviços do Airflow. O PostgreSQL armazena os metadados das execuções, o Redis funciona como broker do Celery e os componentes do Airflow cuidam da API, do agendamento, do processamento das DAGs e da execução das tarefas.
 
-- **Raw:** mantenho os dados recebidos no formato Parquet e crio tabelas externas no BigQuery para consultá-los.
-- **Silver:** preparo os dados para uso analítico, ajustando tipos, padronizando valores e aplicando validações.
-- **Gold:** organizo dimensões e fatos para responder perguntas de negócio e alimentar o Power BI.
+## Camadas de dados
 
-Essa separação me ajuda a identificar em qual etapa preciso investigar quando encontro um problema.
+**Raw:** mantenho os arquivos Parquet no Google Cloud Storage e consulto esses arquivos no BigQuery por meio de tabelas externas. A organização por data ajuda a rastrear as extrações.
 
-## Cuidados que estou colocando no fluxo
+**Silver:** preparo os dados para análise, padronizando tipos e valores e aplicando regras de qualidade sem perder as chaves necessárias para relacionar as entidades.
 
-Estou organizando os arquivos do bucket por tabela e data de extração. Assim consigo identificar quando cada conjunto foi enviado. O caminho de saída é previsível, então uma tentativa repetida da mesma execução reutiliza o mesmo destino.
+**Gold:** organizo os dados em modelos dimensionais. Cada fato deve ter um grão definido, como uma linha por pedido ou uma linha por item do pedido; dimensões descrevem entidades como clientes, produtos e vendedores.
 
-No extrator, verifico se a pasta de origem existe, se há arquivos CSV para processar e se dois arquivos não foram associados ao mesmo nome de tabela Raw. No Airflow, configurei novas tentativas quando uma tarefa falha.
+## Confiabilidade e qualidade
 
-Também estou começando a criar assertions no Dataform. Uma delas procura pedidos com `order_id` nulo ou repetido. Quero ampliar essas verificações para conferir datas, valores e relacionamentos entre as tabelas.
+Os objetos do bucket são organizados por tabela e data de extração. O caminho determinístico permite que uma tentativa repetida da mesma execução use o mesmo destino.
 
-As credenciais do Google Cloud são fornecidas localmente pelo Application Default Credentials. O arquivo `.env` guarda configurações locais e não deve ser enviado ao GitHub. Também deixo os dados CSV e o arquivo do Power BI fora do repositório.
+O extrator verifica se a pasta de dados existe, se há CSVs para processar e se arquivos diferentes não foram mapeados para o mesmo nome de tabela Raw. A DAG está configurada com novas tentativas quando uma tarefa falha.
 
-## Tecnologias que estou usando
+No Dataform, comecei a criar assertions para encontrar problemas como chaves nulas ou duplicadas. Quero ampliar as validações para relacionamentos, datas e regras de negócio e comparar contagens entre Raw, Silver e Gold.
 
-- Python
-- Polars
-- Apache Airflow
+As credenciais do Google Cloud são fornecidas localmente por Application Default Credentials. O arquivo `.env`, as credenciais, os CSVs e o relatório do Power BI não devem ser enviados ao GitHub.
+
+## Tecnologias
+
+- Python, Polars e UV
+- Apache Airflow com CeleryExecutor
 - Docker Compose
-- PostgreSQL para os metadados do Airflow
-- Redis para a fila do Celery
+- PostgreSQL e Redis
 - Google Cloud Storage
-- BigQuery
-- Dataform
+- BigQuery e Dataform
 - Power BI
 
-## Como estou executando localmente
+## Execução local
 
-### O que preciso ter
+### Pré-requisitos
 
 - Docker Desktop com Docker Compose v2;
-- Google Cloud CLI autenticado e com acesso de gravação no bucket;
-- arquivos CSV da Olist dentro da pasta `data/`;
-- um arquivo `.env` com as configurações locais do projeto e do Airflow.
+- Google Cloud CLI autenticado e com permissão de gravação no bucket;
+- arquivos CSV da Olist na pasta `data/`;
+- arquivo `.env` configurado com as variáveis usadas pelo `docker-compose.yml`;
+- credenciais ADC disponíveis no Windows.
 
-No Windows, uso Application Default Credentials para autenticar o acesso ao Google Cloud:
+Para configurar as credenciais ADC, uso:
 
 ```powershell
 gcloud auth application-default login
 Test-Path "$env:APPDATA\gcloud\application_default_credentials.json"
 ```
 
-Se o arquivo de credenciais já existir, não preciso autenticar novamente. Mantenho o `.env` apenas no meu ambiente local e não uso os segredos de desenvolvimento em produção.
+Se o arquivo já existir, não preciso autenticar novamente. O Compose monta as credenciais como somente leitura nos containers. Se eu quiser preparar as dependências Python fora do Docker, uso `uv sync`.
 
-### Iniciar o Airflow
-
-Na pasta do projeto, executo:
+Para iniciar o Airflow, executo na raiz do projeto:
 
 ```powershell
 docker compose build
@@ -97,54 +93,34 @@ docker compose up airflow-init
 docker compose up -d
 ```
 
-Depois, acesso [http://localhost:8080](http://localhost:8080), abro o DAG `olist_csv_to_gcs` e uso **Trigger DAG** para iniciar uma execução manual.
+Depois, acesso [http://localhost:8080](http://localhost:8080), abro a DAG `olist_csv_to_gcs` e uso **Trigger DAG** para iniciar uma execução manual.
 
-Também configurei o DAG para executar diariamente às 09:00 no fuso `America/Sao_Paulo`. Como o Airflow está rodando localmente, meu computador e os containers precisam estar ligados nesse horário.
-
-Para acompanhar os serviços, uso:
+Para acompanhar os serviços e seus logs:
 
 ```powershell
 docker compose ps
 docker compose logs --tail 100 airflow-worker airflow-scheduler airflow-apiserver
 ```
 
-Para parar os containers sem apagar o banco local e o histórico do Airflow:
+Para parar os containers sem apagar o banco local e o histórico do Airflow, uso `docker compose down`. O comando `docker compose down --volumes` também remove o volume do PostgreSQL.
 
-```powershell
-docker compose down
-```
+## Agendamento e origem dos dados
 
-O comando `docker compose down --volumes` também apaga o banco de metadados local.
+Configurei a DAG para executar diariamente às 09:00 no fuso `America/Sao_Paulo`. Como o Airflow está rodando localmente, meu computador e os containers precisam estar ativos nesse horário.
 
-## Como os arquivos ficam no bucket
+O conjunto público da Olist é estático. Enquanto eu usar os mesmos arquivos, as execuções diárias enviarão novamente os mesmos dados em caminhos associados a novas datas. Isso me permite praticar o histórico de ingestão, mas não representa uma fonte que realmente se atualiza todos os dias.
 
-Estou convertendo os arquivos para Parquet e organizando os destinos por nome de tabela e data:
+## Status e próximos passos
 
-| Arquivo CSV | Tabela Raw | Destino no bucket |
-|---|---|---|
-| `olist_customers_dataset.csv` | `customers` | `raw/customers/data_extracao=AAAA-MM-DD/customers.parquet` |
-| `olist_order_items_dataset.csv` | `order_items` | `raw/order_items/data_extracao=AAAA-MM-DD/order_items.parquet` |
-| `olist_orders_dataset.csv` | `orders` | `raw/orders/data_extracao=AAAA-MM-DD/orders.parquet` |
-| `olist_products_dataset.csv` | `products` | `raw/products/data_extracao=AAAA-MM-DD/products.parquet` |
-| `olist_sellers_dataset.csv` | `sellers` | `raw/sellers/data_extracao=AAAA-MM-DD/sellers.parquet` |
-| `product_category_name_translation.csv` | `product_category_name_translation` | `raw/product_category_name_translation/data_extracao=AAAA-MM-DD/product_category_name_translation.parquet` |
+Estou montando a ingestão local com Airflow e Docker e desenvolvendo os modelos SQL do BigQuery/Dataform. Meus próximos passos são:
 
-O conjunto público da Olist não é atualizado diariamente. Por isso, enquanto eu usar os mesmos arquivos, cada execução agendada enviará novamente o mesmo conteúdo em uma nova pasta de data. Estou usando essa organização para praticar o histórico de ingestão; quando a fonte for atualizada, vou precisar definir como capturar somente as mudanças e evitar armazenamento desnecessário.
+1. concluir as tabelas externas Raw e conferir os esquemas;
+2. alinhar as consultas Silver para consumirem as tabelas Raw;
+3. executar as transformações no Dataform e ampliar as assertions;
+4. validar contagens, chaves e relacionamentos entre as camadas;
+5. finalizar os modelos Gold para análise de pedidos e vendas;
+6. conectar o Power BI e validar indicadores e filtros de período.
 
-## Em que ponto o projeto está
+Algumas consultas Silver ainda possuem referências a `Bronze.*`. Como defini `Raw` como camada de origem, preciso alinhar essas referências antes de executar as transformações.
 
-Já preparei a ingestão local com Airflow e Docker, a conversão dos arquivos para Parquet e o envio ao Google Cloud Storage. Também comecei a estruturar os modelos SQL das camadas Silver e Gold.
-
-Ainda preciso concluir e validar as tabelas externas no BigQuery Raw e alinhar as consultas Silver com elas. Alguns SQLs atuais ainda usam referências a `Bronze.*`, mas a camada de origem que estou adotando neste projeto é `Raw.*`. Vou corrigir essa diferença antes de executar os modelos no Dataform.
-
-## O que pretendo fazer em seguida
-
-1. Concluir as tabelas externas Raw e conferir seus esquemas.
-2. Ajustar os SQLs Silver para consumir as tabelas Raw.
-3. Executar as transformações no Dataform e ampliar as assertions.
-4. Conferir contagens, chaves e datas entre as camadas.
-5. Finalizar as tabelas Gold para análise de pedidos, vendas e produtos.
-6. Conectar o Power BI e validar os indicadores e filtros de período.
-7. Depois de consolidar o fluxo local, estudar como executá-lo em um serviço gerenciado.
-
-Este projeto é meu espaço para aprender fazendo: quero conseguir explicar de onde os dados vieram, o que foi feito com eles e como verificar se o resultado está correto.
+Este projeto é uma forma de aprender construindo. Quero conseguir explicar de onde os dados vieram, o que foi transformado em cada camada e como validei os resultados.
